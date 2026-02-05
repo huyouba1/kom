@@ -66,7 +66,8 @@ func (k *Kubectl) Namespace(namespaces ...string) *Kubectl {
 	result := strings.Join(parts, " or ")
 	result = fmt.Sprintf("(%s)", result)
 	if result != "()" {
-		k.Where(result)
+		// apply to tx
+		return tx.Where(result)
 	}
 	return tx
 }
