@@ -36,9 +36,9 @@ type ClusterInstances struct {
 type ClusterInst struct {
 	ID                 string                       // 集群ID
 	Kubectl            *Kubectl                     // kom
-	Client             *kubernetes.Clientset        // kubernetes 客户端
+	Client             kubernetes.Interface         // kubernetes 客户端
 	Config             *rest.Config                 // rest config
-	DynamicClient      *dynamic.DynamicClient       // 动态客户端
+	DynamicClient      dynamic.Interface            // 动态客户端
 	apiResources       []*metav1.APIResource        // 当前k8s已注册资源
 	crdList            []*unstructured.Unstructured // 当前k8s已注册资源 //TODO 定时更新或者Watch更新
 	callbacks          *callbacks                   // 回调
