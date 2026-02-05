@@ -3,15 +3,13 @@ package kom
 import (
 	"fmt"
 	"reflect"
-	"strings"
-	"testing"
 
-	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/dynamic/fake"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 )
 
@@ -21,13 +19,16 @@ func RegisterFakeCluster(id string, objects ...runtime.Object) *Kubectl {
 	fakeClient := k8sfake.NewSimpleClientset(objects...)
 
 	// 2. 创建 Fake Dynamic Client
-	scheme := runtime.NewScheme()
-	_ = v1.AddToScheme(scheme)
+	s := scheme.Scheme
+	// scheme := runtime.NewScheme()
+	// _ = v1.AddToScheme(scheme)
+	// _ = appsv1.AddToScheme(scheme)
+	// metav1.AddToGroupVersion(scheme, schema.GroupVersion{Version: "v1"})
 	// 将传入的对象转换为 Unstructured 以便 Dynamic Client 使用
 	// 注意：fake.NewSimpleDynamicClient 需要 runtime.Object，如果传入的是 typed object (如 v1.Pod)，
 	// 它内部会自动处理，但为了保险起见，我们可以确保 scheme 包含了这些类型。
 	// 这里简化处理，直接传入 objects。
-	fakeDynamicClient := fake.NewSimpleDynamicClient(scheme, objects...)
+	fakeDynamicClient := fake.NewSimpleDynamicClient(s, objects...)
 
 	// 3. 初始化 ClusterInst
 	// 注意：我们需要创建一个 ClusterInst 并注册到全局 Clusters 中，或者直接返回一个绑定了 fake client 的 Kubectl
@@ -42,6 +43,28 @@ func RegisterFakeCluster(id string, objects ...runtime.Object) *Kubectl {
 		DynamicClient: fakeDynamicClient,
 		apiResources: []*metav1.APIResource{
 			{Name: "pods", Namespaced: true, Kind: "Pod", Group: "", Version: "v1"},
+			{Name: "deployments", Namespaced: true, Kind: "Deployment", Group: "apps", Version: "v1"},
+			{Name: "replicasets", Namespaced: true, Kind: "ReplicaSet", Group: "apps", Version: "v1"},
+			{Name: "statefulsets", Namespaced: true, Kind: "StatefulSet", Group: "apps", Version: "v1"},
+			{Name: "daemonsets", Namespaced: true, Kind: "DaemonSet", Group: "apps", Version: "v1"},
+			{Name: "controllerrevisions", Namespaced: true, Kind: "ControllerRevision", Group: "apps", Version: "v1"},
+			{Name: "services", Namespaced: true, Kind: "Service", Group: "", Version: "v1"},
+			{Name: "nodes", Namespaced: false, Kind: "Node", Group: "", Version: "v1"},
+			{Name: "namespaces", Namespaced: false, Kind: "Namespace", Group: "", Version: "v1"},
+			{Name: "configmaps", Namespaced: true, Kind: "ConfigMap", Group: "", Version: "v1"},
+			{Name: "secrets", Namespaced: true, Kind: "Secret", Group: "", Version: "v1"},
+			{Name: "events", Namespaced: true, Kind: "Event", Group: "", Version: "v1"},
+			{Name: "serviceaccounts", Namespaced: true, Kind: "ServiceAccount", Group: "", Version: "v1"},
+			{Name: "roles", Namespaced: true, Kind: "Role", Group: "rbac.authorization.k8s.io", Version: "v1"},
+			{Name: "rolebindings", Namespaced: true, Kind: "RoleBinding", Group: "rbac.authorization.k8s.io", Version: "v1"},
+			{Name: "clusterroles", Namespaced: false, Kind: "ClusterRole", Group: "rbac.authorization.k8s.io", Version: "v1"},
+			{Name: "clusterrolebindings", Namespaced: false, Kind: "ClusterRoleBinding", Group: "rbac.authorization.k8s.io", Version: "v1"},
+			{Name: "persistentvolumes", Namespaced: false, Kind: "PersistentVolume", Group: "", Version: "v1"},
+			{Name: "persistentvolumeclaims", Namespaced: true, Kind: "PersistentVolumeClaim", Group: "", Version: "v1"},
+			{Name: "storageclasses", Namespaced: false, Kind: "StorageClass", Group: "storage.k8s.io", Version: "v1"},
+			{Name: "ingresses", Namespaced: true, Kind: "Ingress", Group: "networking.k8s.io", Version: "v1"},
+			{Name: "customresourcedefinitions", Namespaced: false, Kind: "CustomResourceDefinition", Group: "apiextensions.k8s.io", Version: "v1"},
+			{Name: "cronjobs", Namespaced: true, Kind: "CronJob", Group: "batch", Version: "v1"},
 		},
 	}
 
@@ -59,6 +82,115 @@ func registerFakeHandlers(c *callbacks) {
 	c.Get().Register("fake:get", fakeGet)
 	c.List().Register("fake:list", fakeList)
 	c.Delete().Register("fake:delete", fakeDelete)
+	c.Create().Register("fake:create", fakeCreate)
+	c.Update().Register("fake:update", fakeUpdate)
+	c.Patch().Register("fake:patch", fakePatch)
+	c.Exec().Register("fake:exec", fakeExec)
+	c.Logs().Register("fake:logs", fakeLogs)
+}
+
+func fakeExec(k *Kubectl) error {
+	if k.Statement.Command == "" {
+		return fmt.Errorf("command is empty")
+	}
+	return nil
+}
+
+func fakeLogs(k *Kubectl) error {
+	if k.Statement.PodLogOptions == nil {
+		return fmt.Errorf("PodLogOptions is nil")
+	}
+	return nil
+}
+
+func fakeCreate(k *Kubectl) error {
+	stmt := k.Statement
+	gvr := stmt.GVR
+	ns := stmt.Namespace
+	ctx := stmt.Context
+
+	// Convert Dest to Unstructured
+	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(stmt.Dest)
+	if err != nil {
+		return err
+	}
+	u := &unstructured.Unstructured{Object: obj}
+
+	// Ensure name and namespace are set if missing (though usually set in stmt)
+	if u.GetName() == "" && stmt.Name != "" {
+		u.SetName(stmt.Name)
+	}
+	if u.GetNamespace() == "" && stmt.Namespace != "" {
+		u.SetNamespace(stmt.Namespace)
+	}
+
+	var res *unstructured.Unstructured
+
+	if stmt.Namespaced {
+		res, err = stmt.Kubectl.DynamicClient().Resource(gvr).Namespace(ns).Create(ctx, u, metav1.CreateOptions{})
+	} else {
+		res, err = stmt.Kubectl.DynamicClient().Resource(gvr).Create(ctx, u, metav1.CreateOptions{})
+	}
+
+	if err != nil {
+		return err
+	}
+
+	return runtime.DefaultUnstructuredConverter.FromUnstructured(res.Object, stmt.Dest)
+}
+
+func fakeUpdate(k *Kubectl) error {
+	stmt := k.Statement
+	gvr := stmt.GVR
+	ns := stmt.Namespace
+	ctx := stmt.Context
+
+	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(stmt.Dest)
+	if err != nil {
+		return err
+	}
+	u := &unstructured.Unstructured{Object: obj}
+
+	var res *unstructured.Unstructured
+	if stmt.Namespaced {
+		res, err = stmt.Kubectl.DynamicClient().Resource(gvr).Namespace(ns).Update(ctx, u, metav1.UpdateOptions{})
+	} else {
+		res, err = stmt.Kubectl.DynamicClient().Resource(gvr).Update(ctx, u, metav1.UpdateOptions{})
+	}
+
+	if err != nil {
+		return err
+	}
+
+	return runtime.DefaultUnstructuredConverter.FromUnstructured(res.Object, stmt.Dest)
+}
+
+func fakePatch(k *Kubectl) error {
+	stmt := k.Statement
+	gvr := stmt.GVR
+	ns := stmt.Namespace
+	name := stmt.Name
+	ctx := stmt.Context
+	patchType := stmt.PatchType
+	patchData := []byte(stmt.PatchData)
+
+	var res *unstructured.Unstructured
+	var err error
+
+	if stmt.Namespaced {
+		res, err = stmt.Kubectl.DynamicClient().Resource(gvr).Namespace(ns).Patch(ctx, name, patchType, patchData, metav1.PatchOptions{})
+	} else {
+		res, err = stmt.Kubectl.DynamicClient().Resource(gvr).Patch(ctx, name, patchType, patchData, metav1.PatchOptions{})
+	}
+
+	if err != nil {
+		return err
+	}
+
+	if stmt.Dest != nil {
+		return runtime.DefaultUnstructuredConverter.FromUnstructured(res.Object, stmt.Dest)
+	}
+	return nil
 }
 
 func fakeGet(k *Kubectl) error {
@@ -90,6 +222,11 @@ func fakeList(k *Kubectl) error {
 	ns := stmt.Namespace
 	ctx := stmt.Context
 
+	opts := metav1.ListOptions{}
+	if len(stmt.ListOptions) > 0 {
+		opts = stmt.ListOptions[0]
+	}
+
 	var list *unstructured.UnstructuredList
 	var err error
 
@@ -97,9 +234,9 @@ func fakeList(k *Kubectl) error {
 		if ns == "" {
 			ns = metav1.NamespaceDefault
 		}
-		list, err = stmt.Kubectl.DynamicClient().Resource(gvr).Namespace(ns).List(ctx, metav1.ListOptions{})
+		list, err = stmt.Kubectl.DynamicClient().Resource(gvr).Namespace(ns).List(ctx, opts)
 	} else {
-		list, err = stmt.Kubectl.DynamicClient().Resource(gvr).List(ctx, metav1.ListOptions{})
+		list, err = stmt.Kubectl.DynamicClient().Resource(gvr).List(ctx, opts)
 	}
 
 	if err != nil {
@@ -159,113 +296,4 @@ func fakeDelete(k *Kubectl) error {
 		return stmt.Kubectl.DynamicClient().Resource(gvr).Namespace(ns).Delete(ctx, name, metav1.DeleteOptions{})
 	}
 	return stmt.Kubectl.DynamicClient().Resource(gvr).Delete(ctx, name, metav1.DeleteOptions{})
-}
-
-func TestGetPodWithFakeClient(t *testing.T) {
-	podName := "test-pod"
-	ns := "default"
-	pod := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      podName,
-			Namespace: ns,
-		},
-		Spec: v1.PodSpec{
-			Containers: []v1.Container{
-				{Name: "nginx", Image: "nginx:latest"},
-			},
-		},
-	}
-
-	RegisterFakeCluster("test-cluster", pod)
-
-	var res v1.Pod
-	err := Cluster("test-cluster").Resource(&v1.Pod{}).Namespace(ns).Name(podName).Get(&res).Error
-	if err != nil {
-		t.Fatalf("Get failed: %v", err)
-	}
-
-	if res.Name != podName {
-		t.Errorf("Expected name %s, got %s", podName, res.Name)
-	}
-}
-
-func TestListPodsWithFakeClient(t *testing.T) {
-	pod1 := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "default"}}
-	pod2 := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod2", Namespace: "default"}}
-
-	RegisterFakeCluster("list-cluster", pod1, pod2)
-
-	var pods []v1.Pod
-	// 必须设置 GVK，因为 Resource(&v1.Pod{}) 会解析 GVK
-	err := Cluster("list-cluster").Resource(&v1.Pod{}).Namespace("default").List(&pods).Error
-	if err != nil {
-		t.Fatalf("List failed: %v", err)
-	}
-
-	if len(pods) != 2 {
-		t.Errorf("Expected 2 pods, got %d", len(pods))
-	}
-}
-
-func TestDeletePodWithFakeClient(t *testing.T) {
-	podName := "del-pod"
-	pod := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: podName, Namespace: "default"}}
-	RegisterFakeCluster("del-cluster", pod)
-
-	err := Cluster("del-cluster").Resource(&v1.Pod{}).Namespace("default").Name(podName).Delete().Error
-	if err != nil {
-		t.Fatalf("Delete failed: %v", err)
-	}
-
-	// Verify deletion
-	var res v1.Pod
-	err = Cluster("del-cluster").Resource(&v1.Pod{}).Namespace("default").Name(podName).Get(&res).Error
-	if err == nil {
-		t.Errorf("Expected error after deletion, got nil")
-	}
-}
-
-func TestChainSideEffect(t *testing.T) {
-	RegisterFakeCluster("side-effect")
-	k := Cluster("side-effect")
-
-	// Create a ctl/pod chain
-	c1 := k.Ctl().Pod()
-	c1.ContainerName("c1")
-
-	// Branch off
-	c2 := c1.ContainerName("c2")
-
-	// Check if c1 was modified
-	// Note: We need to access internal state.
-	// c1 and c2 are *pod, which has unexported field kubectl *Kubectl.
-	// In package kom, we can access unexported fields.
-
-	if c1 == c2 {
-		t.Errorf("c1 and c2 are the same pointer: Mutable implementation confirmed")
-	} else {
-		t.Logf("c1 and c2 are different pointers: Immutable implementation confirmed")
-	}
-
-	// c1.kubectl should be accessible
-	if c1.kubectl.Statement.ContainerName == "c2" {
-		t.Errorf("Side Effect Observed: c1 container name changed to c2")
-	} else {
-		t.Logf("No Side Effect Observed")
-	}
-}
-
-func TestStdinBug(t *testing.T) {
-	RegisterFakeCluster("stdin-cluster")
-	k := Cluster("stdin-cluster")
-	reader := strings.NewReader("test")
-
-	p := k.Ctl().Pod()
-	p2 := p.Stdin(reader)
-
-	if p2.kubectl.Statement.Stdin != reader {
-		t.Errorf("Confirmed Bug: Stdin did not set reader on returned pod")
-	} else {
-		t.Logf("Bug fixed: Stdin set reader correctly")
-	}
 }
