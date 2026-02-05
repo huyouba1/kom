@@ -76,7 +76,7 @@ func (k *Kubectl) RestConfig() *rest.Config {
 	cluster := Clusters().GetClusterById(k.ID)
 	return cluster.Config
 }
-func (k *Kubectl) Client() *kubernetes.Clientset {
+func (k *Kubectl) Client() kubernetes.Interface {
 	cluster := Clusters().GetClusterById(k.ID)
 	return cluster.Client
 }
@@ -84,7 +84,7 @@ func (k *Kubectl) ClusterCache() *ristretto.Cache[string, any] {
 	cache := Clusters().GetClusterById(k.ID).Cache
 	return cache
 }
-func (k *Kubectl) DynamicClient() *dynamic.DynamicClient {
+func (k *Kubectl) DynamicClient() dynamic.Interface {
 	cluster := Clusters().GetClusterById(k.ID)
 	return cluster.DynamicClient
 }

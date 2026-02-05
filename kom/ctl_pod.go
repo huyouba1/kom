@@ -15,23 +15,20 @@ type pod struct {
 func (p *pod) ContainerName(c string) *pod {
 	tx := p.kubectl.getInstance()
 	tx.Statement.ContainerName = c
-	p.kubectl = tx
-	return p
+	return &pod{kubectl: tx, Error: p.Error}
 }
 
 func (p *pod) Command(command string, args ...string) *pod {
 	tx := p.kubectl.getInstance()
 	tx.Statement.Command = command
 	tx.Statement.Args = args
-	p.kubectl = tx
-	return p
+	return &pod{kubectl: tx, Error: p.Error}
 }
 func (p *pod) Execute(dest interface{}) *pod {
 	tx := p.kubectl.getInstance()
 	tx.Statement.Dest = dest
 	tx.Error = tx.Callback().Exec().Execute(tx)
-	p.Error = tx.Error
-	return p
+	return &pod{kubectl: tx, Error: tx.Error}
 }
 
 func (p *pod) StreamExecute(stdout, stderr func(data []byte) error) *Kubectl {
@@ -39,20 +36,18 @@ func (p *pod) StreamExecute(stdout, stderr func(data []byte) error) *Kubectl {
 	tx.Statement.StdoutCallback = stdout
 	tx.Statement.StderrCallback = stderr
 	tx.Error = tx.Callback().StreamExec().Execute(tx)
-	p.Error = tx.Error
 	return tx
 }
 func (p *pod) StreamExecuteWithOptions(opt *remotecommand.StreamOptions) *Kubectl {
 	tx := p.kubectl.getInstance()
 	tx.Statement.StreamOptions = opt
 	tx.Error = tx.Callback().StreamExec().Execute(tx)
-	p.Error = tx.Error
 	return tx
 }
 func (p *pod) Stdin(reader io.Reader) *pod {
 	tx := p.kubectl.getInstance()
 	tx.Statement.Stdin = reader
-	return p
+	return &pod{kubectl: tx, Error: p.Error}
 }
 func (p *pod) GetLogs(requestPtr interface{}, opt *v1.PodLogOptions) *pod {
 	tx := p.kubectl.getInstance()
@@ -65,8 +60,7 @@ func (p *pod) GetLogs(requestPtr interface{}, opt *v1.PodLogOptions) *pod {
 	tx.Statement.PodLogOptions.Container = tx.Statement.ContainerName
 	tx.Statement.Dest = requestPtr
 	tx.Error = tx.Callback().Logs().Execute(tx)
-	p.Error = tx.Error
-	return p
+	return &pod{kubectl: tx, Error: tx.Error}
 }
 func (p *pod) PortForward(localPort, podPort string, stopCh chan struct{}) *Kubectl {
 	tx := p.kubectl.getInstance()
