@@ -148,6 +148,32 @@ func registerFakeHandlers(c *callbacks) {
 	c.Exec().Register("fake:exec", fakeExec)
 	c.Logs().Register("fake:logs", fakeLogs)
 	c.Describe().Register("fake:describe", fakeDescribe)
+	c.StreamExec().Register("fake:stream-exec", fakeStreamExec)
+	c.PortForward().Register("fake:port-forward", fakePortForward)
+}
+
+func fakeStreamExec(k *Kubectl) error {
+	if k.Statement.StreamOptions != nil {
+		// Verify options if needed
+	}
+	// Simulate output if StdoutCallback is set
+	if k.Statement.StdoutCallback != nil {
+		k.Statement.StdoutCallback([]byte("fake stream output"))
+	}
+	return nil
+}
+
+func fakePortForward(k *Kubectl) error {
+	if k.Statement.PortForwardLocalPort == "" || k.Statement.PortForwardPodPort == "" {
+		return fmt.Errorf("ports not set")
+	}
+	// Simulate port forward started
+	go func() {
+		if k.Statement.PortForwardStopCh != nil {
+			<-k.Statement.PortForwardStopCh
+		}
+	}()
+	return nil
 }
 
 func fakeExec(k *Kubectl) error {

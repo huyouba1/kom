@@ -1,13 +1,43 @@
 package kom
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
 	"net/http"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/dgraph-io/ristretto/v2"
 	"k8s.io/client-go/rest"
 )
+
+func generateSelfSignedCertPEM() []byte {
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil
+	}
+	template := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			Organization: []string{"Test Co"},
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+	}
+	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
+	if err != nil {
+		return nil
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
+}
 
 func TestRegisterByConfigWithID_Extended(t *testing.T) {
 	// 1. Test Register with CacheConfig
@@ -18,7 +48,7 @@ func TestRegisterByConfigWithID_Extended(t *testing.T) {
 		BufferItems: 64,
 	}
 
-	k, err := Clusters().RegisterByConfigWithID(cfg, "test-cache-id", RegisterCacheConfig(cacheCfg))
+	k, err := Clusters().RegisterByConfigWithID(cfg, "test-cache-id", RegisterCacheConfig(cacheCfg), RegisterDisableCRDWatch())
 	if err != nil {
 		t.Fatalf("Register failed: %v", err)
 	}
@@ -32,7 +62,7 @@ func TestRegisterByConfigWithID_Extended(t *testing.T) {
 	user := "user-1"
 	groups := []string{"group-1"}
 
-	_, err = Clusters().RegisterByConfigWithID(cfg2, "test-impersonate-id", RegisterImpersonation(user, groups, nil))
+	_, err = Clusters().RegisterByConfigWithID(cfg2, "test-impersonate-id", RegisterImpersonation(user, groups, nil), RegisterDisableCRDWatch())
 	if err != nil {
 		t.Fatalf("Register failed: %v", err)
 	}
@@ -49,7 +79,7 @@ func TestRegisterByConfigWithID_Extended(t *testing.T) {
 	proxyFunc := func(req *http.Request) (*url.URL, error) {
 		return url.Parse("http://proxy.custom")
 	}
-	_, err = Clusters().RegisterByConfigWithID(cfg3, "test-proxy-func-id", RegisterProxyFunc(proxyFunc))
+	_, err = Clusters().RegisterByConfigWithID(cfg3, "test-proxy-func-id", RegisterProxyFunc(proxyFunc), RegisterDisableCRDWatch())
 	if err != nil {
 		t.Fatalf("Register failed: %v", err)
 	}
@@ -60,14 +90,17 @@ func TestRegisterByConfigWithID_Extended(t *testing.T) {
 
 	// 4. Test Register with CA Cert
 	cfg4 := &rest.Config{Host: "https://test-ca-cert"}
-	caData := []byte("fake-ca-data")
-	_, err = Clusters().RegisterByConfigWithID(cfg4, "test-ca-cert-id", RegisterCACert(caData))
+	caData := generateSelfSignedCertPEM()
+	if caData == nil {
+		t.Fatal("Failed to generate PEM")
+	}
+	_, err = Clusters().RegisterByConfigWithID(cfg4, "test-ca-cert-id", RegisterCACert(caData), RegisterDisableCRDWatch())
 	if err != nil {
 		t.Fatalf("Register failed: %v", err)
 	}
 	cluster4 := Clusters().GetClusterById("test-ca-cert-id")
 	if string(cluster4.Config.TLSClientConfig.CAData) != string(caData) {
-		t.Errorf("Expected CA data %s, got %s", caData, cluster4.Config.TLSClientConfig.CAData)
+		t.Errorf("Expected CA data match")
 	}
 	if cluster4.Config.TLSClientConfig.Insecure {
 		t.Error("Expected Insecure=false when CA data is provided")
@@ -75,7 +108,7 @@ func TestRegisterByConfigWithID_Extended(t *testing.T) {
 
 	// 5. Test Re-registration (existing cluster)
 	// Already registered test-cache-id
-	k5, err := Clusters().RegisterByConfigWithID(cfg, "test-cache-id")
+	k5, err := Clusters().RegisterByConfigWithID(cfg, "test-cache-id", RegisterDisableCRDWatch())
 	if err != nil {
 		t.Fatalf("Re-register failed: %v", err)
 	}
