@@ -75,6 +75,69 @@ func TestDaemonSet(t *testing.T) {
 		t.Errorf("Restart failed: %v", err)
 	}
 
+	// Test DaemonSet().Restart
+	err = k.Resource(&fetched).Ctl().DaemonSet().Restart()
+	if err != nil {
+		t.Errorf("DaemonSet Restart failed: %v", err)
+	}
+
+	// Test Stop
+	err = k.Resource(&fetched).Ctl().DaemonSet().Stop()
+	if err != nil {
+		t.Errorf("Stop failed: %v", err)
+	}
+	// Verify nodeSelector
+	k.Resource(&updated).Namespace(ns).Name(name).Get(&updated)
+	if val, ok := updated.Spec.Template.Spec.NodeSelector["kubernetes.io/hostname"]; !ok || val != "non-existent-node" {
+		t.Errorf("Expected nodeSelector kubernetes.io/hostname=non-existent-node, got %v", updated.Spec.Template.Spec.NodeSelector)
+	}
+
+	// Test Restore
+	err = k.Resource(&fetched).Ctl().DaemonSet().Restore()
+	if err != nil {
+		t.Errorf("Restore failed: %v", err)
+	}
+	// Verify nodeSelector is removed or null
+	k.Resource(&updated).Namespace(ns).Name(name).Get(&updated)
+	// Note: Patch with null value removes the key in MergePatch, but let's check what happened.
+	// StrategicMergePatchType with null should remove it.
+	if val, ok := updated.Spec.Template.Spec.NodeSelector["kubernetes.io/hostname"]; ok {
+		t.Errorf("Expected nodeSelector kubernetes.io/hostname to be removed, got %s", val)
+	}
+
+	// Test ManagedPods
+	// Create Pod owned by DS
+	pod := &corev1.Pod{
+		TypeMeta: metav1.TypeMeta{Kind: "Pod", APIVersion: "v1"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ds-pod",
+			Namespace: ns,
+			OwnerReferences: []metav1.OwnerReference{
+				{APIVersion: "apps/v1", Kind: "DaemonSet", Name: name, UID: fetched.UID},
+			},
+		},
+	}
+	k.Resource(pod).Create(pod)
+
+	pods, err := k.Resource(&fetched).Ctl().DaemonSet().ManagedPods()
+	if err != nil {
+		t.Errorf("ManagedPods failed: %v", err)
+	}
+	if len(pods) != 1 {
+		t.Errorf("Expected 1 pod, got %d", len(pods))
+	} else if pods[0].Name != "ds-pod" {
+		t.Errorf("Expected ds-pod, got %s", pods[0].Name)
+	}
+
+	// Test ManagedPod
+	p, err := k.Resource(&fetched).Ctl().DaemonSet().ManagedPod()
+	if err != nil {
+		t.Errorf("ManagedPod failed: %v", err)
+	}
+	if p == nil {
+		t.Errorf("Expected a pod, got nil")
+	}
+
 	// Test Delete
 	err = k.Resource(&fetched).Delete().Error
 	if err != nil {

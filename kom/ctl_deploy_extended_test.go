@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -164,5 +165,70 @@ func TestDeploymentExtended(t *testing.T) {
 		// Verify ctl_rollout.go Restart implementation
 		// patchData := fmt.Sprintf(`{"spec":{"template":{"metadata":{"annotations":{"kom.kubernetes.io/restartedAt":"%s"}}}}}`, time.Now().Format(time.DateTime))
 		t.Errorf("Expected restartedAt annotation on template")
+	}
+
+	// 7. Test HPAList
+	hpa := &autoscalingv2.HorizontalPodAutoscaler{
+		TypeMeta: metav1.TypeMeta{Kind: "HorizontalPodAutoscaler", APIVersion: "autoscaling/v2"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-hpa",
+			Namespace: ns,
+		},
+		Spec: autoscalingv2.HorizontalPodAutoscalerSpec{
+			ScaleTargetRef: autoscalingv2.CrossVersionObjectReference{
+				Kind:       "Deployment",
+				Name:       name,
+				APIVersion: "apps/v1",
+			},
+			MinReplicas: func() *int32 { i := int32(1); return &i }(),
+			MaxReplicas: 10,
+		},
+	}
+	k.Resource(hpa).Create(hpa)
+
+	hpas, err := k.Resource(deploy).Ctl().Deployment().HPAList()
+	if err != nil {
+		t.Errorf("HPAList failed: %v", err)
+	}
+	// Note: The Fake client + kom Where clause filtering might not work perfectly for nested fields like spec.scaleTargetRef.name
+	// But let's verify if we get the HPA back.
+	if len(hpas) != 1 {
+		t.Errorf("Expected 1 HPA, got %d", len(hpas))
+	} else if hpas[0].Name != "test-hpa" {
+		t.Errorf("Expected test-hpa, got %s", hpas[0].Name)
+	}
+
+	// 8. Test ReplaceImageTag
+	// Current image is "i" (from creation)
+	_, err = k.Resource(deploy).Ctl().Deployment().ReplaceImageTag("c", "v2")
+	if err != nil {
+		t.Errorf("ReplaceImageTag failed: %v", err)
+	}
+	// Verify
+	k.Resource(&d).Namespace(ns).Name(name).Get(&d)
+	if d.Spec.Template.Spec.Containers[0].Image != "i:v2" {
+		t.Errorf("Expected i:v2, got %s", d.Spec.Template.Spec.Containers[0].Image)
+	}
+
+	// Test ReplaceImageTag with existing tag
+	// Now image is i:v2
+	_, err = k.Resource(deploy).Ctl().Deployment().ReplaceImageTag("c", "v3")
+	if err != nil {
+		t.Errorf("ReplaceImageTag v3 failed: %v", err)
+	}
+	k.Resource(&d).Namespace(ns).Name(name).Get(&d)
+	if d.Spec.Template.Spec.Containers[0].Image != "i:v3" {
+		t.Errorf("Expected i:v3, got %s", d.Spec.Template.Spec.Containers[0].Image)
+	}
+
+	// 9. Test ManagedPod (Singular)
+	p, err := k.Resource(deploy).Ctl().Deployment().ManagedPod()
+	if err != nil {
+		t.Errorf("ManagedPod failed: %v", err)
+	}
+	if p == nil {
+		t.Errorf("Expected a pod, got nil")
+	} else if p.Name != "pod-2" {
+		t.Errorf("Expected pod-2, got %s", p.Name)
 	}
 }
