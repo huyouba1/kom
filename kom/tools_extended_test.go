@@ -3,6 +3,8 @@ package kom
 import (
 	"testing"
 
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
@@ -77,18 +79,77 @@ func TestToolsExtended(t *testing.T) {
 	}
 
 	// 7. Test GetGVRByKind with missing resource
-	_, ok2 := k.Tools().GetGVRByKind("Missing")
-	// Note: GetGVRByKind returns (gvr, namespaced), where gvr is empty if not found.
-	// But it doesn't return 'ok' bool.
-	// We can check if GVR is empty.
-	if ok2 {
-		// Wait, GetGVRByKind returns (gvr, namespaced).
-		// If not found, it returns empty GVR and false.
-		// So ok2 corresponds to 'namespaced' return value.
-		// This logic test might be slightly off if I don't check GVR.
-	}
 	gvrEmpty, _ := k.Tools().GetGVRByKind("Missing")
 	if gvrEmpty.Resource != "" {
 		t.Errorf("GetGVRByKind should return empty GVR for missing resource")
 	}
+
+	// 8. Test GetCRD and related
+	// Create a CRD first
+	crdName := "mycrds.example.com"
+	crd := &apiextensionsv1.CustomResourceDefinition{
+		TypeMeta: metav1.TypeMeta{Kind: "CustomResourceDefinition", APIVersion: "apiextensions.k8s.io/v1"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: crdName,
+		},
+		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
+			Group: "example.com",
+			Names: apiextensionsv1.CustomResourceDefinitionNames{
+				Plural:   "mycrds",
+				Singular: "mycrd",
+				Kind:     "MyCRD",
+				ListKind: "MyCRDList",
+			},
+			Scope: apiextensionsv1.ClusterScoped,
+			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{
+				{
+					Name:    "v1",
+					Served:  true,
+					Storage: true,
+					Schema: &apiextensionsv1.CustomResourceValidation{
+						OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
+							Type: "object",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err = k.Resource(crd).Create(crd).Error
+	if err != nil {
+		t.Fatalf("Failed to create CRD: %v", err)
+	}
+
+	// Now test GetCRD
+	gotCRD, err := k.Tools().GetCRD("MyCRD", "example.com")
+	if err != nil {
+		t.Errorf("GetCRD failed: %v", err)
+	}
+
+	// Test GetGVRFromCRD
+	gvrFromCRD := k.Tools().GetGVRFromCRD(gotCRD)
+	expectedGVR := schema.GroupVersionResource{Group: "example.com", Version: "v1", Resource: "mycrds"}
+	if gvrFromCRD != expectedGVR {
+		t.Errorf("GetGVRFromCRD failed, got %v, expected %v", gvrFromCRD, expectedGVR)
+	}
+
+	// Test FindGVKByTableNameInCRDList
+	foundGVKCRD := k.Tools().FindGVKByTableNameInCRDList("mycrds")
+	if foundGVKCRD == nil || foundGVKCRD.Kind != "MyCRD" {
+		t.Errorf("FindGVKByTableNameInCRDList failed, got %v", foundGVKCRD)
+	}
+
+	// Test ParseGVK2GVR for CRD
+	gvkCRD := schema.GroupVersionKind{Group: "example.com", Version: "v1", Kind: "MyCRD"}
+	gvrParsed, namespaced := k.Tools().ParseGVK2GVR([]schema.GroupVersionKind{gvkCRD})
+	if gvrParsed != expectedGVR {
+		t.Errorf("ParseGVK2GVR failed for CRD, got %v", gvrParsed)
+	}
+	if namespaced { // Scope is ClusterScoped
+		t.Errorf("ParseGVK2GVR should return namespaced=false for ClusterScoped CRD")
+	}
+
+	// Test ClearCache
+	k.Tools().ClearCache()
 }

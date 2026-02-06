@@ -18,7 +18,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/version"
-	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/cache"
@@ -94,17 +93,9 @@ func (s *status) GetResourceCountSummary(cacheSeconds int) (map[schema.GroupVers
 	return utils.GetOrSetCache(s.kubectl.ClusterCache(), "GetResourceCountSummary", d, func() (map[schema.GroupVersionResource]int, error) {
 		ctx := s.kubectl.Statement.Context
 
-		config := s.kubectl.RestConfig()
-		dynamicClient, err := dynamic.NewForConfig(config)
-		if err != nil {
-			return nil, err
-		}
+		dynamicClient := s.kubectl.DynamicClient()
+		discoveryClient := s.kubectl.Client().Discovery()
 
-		// Create clients
-		discoveryClient, err := discovery.NewDiscoveryClientForConfig(config)
-		if err != nil {
-			return nil, err
-		}
 		apiGroupResources, err := restmapper.GetAPIGroupResources(discoveryClient)
 		if err != nil {
 			return nil, err

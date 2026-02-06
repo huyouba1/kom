@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"reflect"
 
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/version"
+	discoveryfake "k8s.io/client-go/discovery/fake"
 	"k8s.io/client-go/dynamic/fake"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -19,8 +22,29 @@ func RegisterFakeCluster(id string, objects ...runtime.Object) *Kubectl {
 	// 1. 创建 Fake Clientset
 	fakeClient := k8sfake.NewSimpleClientset(objects...)
 
+	// Populate fake discovery
+	if fd, ok := fakeClient.Discovery().(*discoveryfake.FakeDiscovery); ok {
+		fd.FakedServerVersion = &version.Info{Major: "1", Minor: "29", GitVersion: "v1.29.0"}
+		fd.Resources = []*metav1.APIResourceList{
+			{
+				GroupVersion: "v1",
+				APIResources: []metav1.APIResource{
+					{Name: "pods", Namespaced: true, Kind: "Pod", Verbs: []string{"list", "get", "create", "delete", "update", "patch"}},
+					{Name: "services", Namespaced: true, Kind: "Service", Verbs: []string{"list", "get", "create", "delete", "update", "patch"}},
+				},
+			},
+			{
+				GroupVersion: "apps/v1",
+				APIResources: []metav1.APIResource{
+					{Name: "deployments", Namespaced: true, Kind: "Deployment", Verbs: []string{"list", "get", "create", "delete", "update", "patch"}},
+				},
+			},
+		}
+	}
+
 	// 2. 创建 Fake Dynamic Client
 	s := scheme.Scheme
+	_ = apiextensionsv1.AddToScheme(s)
 	// scheme := runtime.NewScheme()
 	// _ = v1.AddToScheme(scheme)
 	// _ = appsv1.AddToScheme(scheme)
@@ -42,6 +66,7 @@ func RegisterFakeCluster(id string, objects ...runtime.Object) *Kubectl {
 		Kubectl:       k,
 		Client:        fakeClient,
 		DynamicClient: fakeDynamicClient,
+		Config:        &rest.Config{Host: "https://fake-cluster"},
 		apiResources: []*metav1.APIResource{
 			{Name: "pods", Namespaced: true, Kind: "Pod", Group: "", Version: "v1"},
 			{Name: "deployments", Namespaced: true, Kind: "Deployment", Group: "apps", Version: "v1"},
@@ -72,6 +97,11 @@ func RegisterFakeCluster(id string, objects ...runtime.Object) *Kubectl {
 	// 4. 注册 fake 回调
 	cluster.callbacks = k.initializeCallbacks()
 	registerFakeHandlers(cluster.callbacks)
+
+	// Initialize other fields for status testing
+	cluster.serverVersion = &version.Info{Major: "1", Minor: "29", GitVersion: "v1.29.0"}
+	// cluster.openAPISchema = k.getOpenAPISchema() // fake client might return nil or empty
+	// cluster.describerMap = k.initializeDescriberMap()
 
 	// 注册到全局 map
 	Clusters().clusters.Store(id, cluster)
@@ -300,8 +330,13 @@ func fakeDelete(k *Kubectl) error {
 	name := stmt.Name
 	ctx := stmt.Context
 
+	var err error
+
 	if stmt.Namespaced {
-		return stmt.Kubectl.DynamicClient().Resource(gvr).Namespace(ns).Delete(ctx, name, metav1.DeleteOptions{})
+		err = stmt.Kubectl.DynamicClient().Resource(gvr).Namespace(ns).Delete(ctx, name, metav1.DeleteOptions{})
+	} else {
+		err = stmt.Kubectl.DynamicClient().Resource(gvr).Delete(ctx, name, metav1.DeleteOptions{})
 	}
-	return stmt.Kubectl.DynamicClient().Resource(gvr).Delete(ctx, name, metav1.DeleteOptions{})
+
+	return err
 }
