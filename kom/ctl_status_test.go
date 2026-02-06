@@ -3,7 +3,12 @@ package kom
 import (
 	"testing"
 
+	openapi_v2 "github.com/google/gnostic-models/openapiv2"
+	"github.com/weibaohui/kom/kom/describe"
+	"github.com/weibaohui/kom/kom/doc"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 func TestStatusMethods(t *testing.T) {
@@ -72,5 +77,33 @@ func TestStatusMethods(t *testing.T) {
 	// 5. Test IsGatewayAPISupported (Positive Case)
 	if !k.Status().IsGatewayAPISupported() {
 		t.Error("GatewayAPI should be supported after injection")
+	}
+
+	// 6. Test Docs
+	// Manually set docs for test
+	cluster := Clusters().GetClusterById("status-cluster")
+	cluster.docs = &doc.Docs{} // Mock docs
+	if k.Status().Docs() == nil {
+		t.Error("Docs should not be nil after setting")
+	}
+
+	// 7. Test OpenAPISchema
+	// Manually set schema
+	cluster.openAPISchema = &openapi_v2.Document{}
+	if k.Status().OpenAPISchema() == nil {
+		t.Error("OpenAPISchema should not be nil after setting")
+	}
+
+	// 8. Test DescriberMap
+	cluster.describerMap = make(map[schema.GroupKind]describe.ResourceDescriber)
+	if k.Status().DescriberMap() == nil {
+		t.Error("DescriberMap should not be nil after setting")
+	}
+
+	// 9. Test APIResources
+	cluster.apiResources = []*metav1.APIResource{}
+	k.Status().SetAPIResources(cluster.apiResources)
+	if k.Status().APIResources() == nil {
+		t.Error("APIResources should not be nil after setting")
 	}
 }

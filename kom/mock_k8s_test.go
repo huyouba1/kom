@@ -54,6 +54,12 @@ func RegisterFakeCluster(id string, objects ...runtime.Object) *Kubectl {
 					{Name: "jobs", Namespaced: true, Kind: "Job", Verbs: []string{"list", "get"}},
 				},
 			},
+			{
+				GroupVersion: "autoscaling/v2",
+				APIResources: []metav1.APIResource{
+					{Name: "horizontalpodautoscalers", Namespaced: true, Kind: "HorizontalPodAutoscaler", Verbs: []string{"list", "get", "create", "update", "delete"}},
+				},
+			},
 		}
 	}
 
