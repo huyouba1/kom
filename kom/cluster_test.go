@@ -2,6 +2,7 @@ package kom
 
 import (
 	"testing"
+	"time"
 
 	"github.com/dgraph-io/ristretto/v2"
 	"github.com/weibaohui/kom/kom/aws"
@@ -186,5 +187,79 @@ func TestGetServerVersion(t *testing.T) {
 	}
 	if v.GitVersion != "v1.28.0" {
 		t.Errorf("Expected version v1.28.0, got %s", v.GitVersion)
+	}
+}
+
+func TestRegisterOptions(t *testing.T) {
+	// 1. Test invalid config
+	_, err := Clusters().RegisterByConfig(nil)
+	if err == nil {
+		t.Error("RegisterByConfig(nil) should return error")
+	}
+
+	// 2. Test Register Options
+	cfg := &rest.Config{
+		Host: "https://test-options-cluster",
+	}
+	timeout := 10 * time.Second
+	qps := float32(50.0)
+	burst := 100
+	ua := "test-agent"
+	proxy := "http://proxy.example.com"
+
+	_, err = Clusters().RegisterByConfig(cfg,
+		RegisterTimeout(timeout),
+		RegisterQPS(qps),
+		RegisterBurst(burst),
+		RegisterUserAgent(ua),
+		RegisterTLSInsecure(),
+		RegisterProxyURL(proxy),
+		RegisterDisableCRDWatch(),
+	)
+	if err != nil {
+		t.Fatalf("RegisterByConfig failed: %v", err)
+	}
+
+	cluster := Clusters().GetClusterById("https://test-options-cluster")
+	if cluster == nil {
+		t.Fatal("Cluster not found")
+	}
+
+	// Check if options applied to config
+	if cluster.Config.Timeout != timeout {
+		t.Errorf("Expected timeout %v, got %v", timeout, cluster.Config.Timeout)
+	}
+	if cluster.Config.QPS != qps {
+		t.Errorf("Expected QPS %v, got %v", qps, cluster.Config.QPS)
+	}
+	if cluster.Config.Burst != burst {
+		t.Errorf("Expected Burst %v, got %v", burst, cluster.Config.Burst)
+	}
+	if cluster.Config.UserAgent != ua {
+		t.Errorf("Expected UserAgent %s, got %s", ua, cluster.Config.UserAgent)
+	}
+	if !cluster.Config.TLSClientConfig.Insecure {
+		t.Error("Expected Insecure=true")
+	}
+	// Check proxy (indirectly via function check, difficult to check value inside function)
+	if cluster.Config.Proxy == nil {
+		t.Error("Expected Proxy function to be set")
+	}
+
+	// 3. Test Invalid Proxy URL
+	// Should log error but not fail registration? Or fail?
+	// Based on code: klog.V(4).Infof("invalid proxy url..."), does not return error.
+	cfg2 := &rest.Config{Host: "https://test-invalid-proxy"}
+	k2, err := Clusters().RegisterByConfig(cfg2, RegisterProxyURL("::invalid-url::"))
+	if err != nil {
+		t.Errorf("Register with invalid proxy should not fail (logs warning): %v", err)
+	}
+	if k2 == nil {
+		t.Error("Kubectl should not be nil")
+	}
+	c2 := Clusters().GetClusterById("https://test-invalid-proxy")
+	if c2.Config.Proxy != nil {
+		// If parsing fails, proxy func is not set
+		t.Error("Proxy func should be nil for invalid URL")
 	}
 }
