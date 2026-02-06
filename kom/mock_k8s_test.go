@@ -7,6 +7,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic/fake"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -173,6 +174,13 @@ func fakePatch(k *Kubectl) error {
 	ctx := stmt.Context
 	patchType := stmt.PatchType
 	patchData := []byte(stmt.PatchData)
+
+	// Workaround for fake client: convert StrategicMergePatchType to MergePatchType
+	// because fake dynamic client deals with Unstructured and might fail with SMPT
+	// if schema information is missing or not fully supported in the fake context.
+	if patchType == types.StrategicMergePatchType {
+		patchType = types.MergePatchType
+	}
 
 	var res *unstructured.Unstructured
 	var err error
