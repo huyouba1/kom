@@ -127,6 +127,9 @@ func (s *status) GetResourceCountSummary(cacheSeconds int) (map[schema.GroupVers
 					go func(namespaced bool, gvr schema.GroupVersionResource) {
 						defer wg.Done()
 						defer func() {
+							if r := recover(); r != nil {
+								klog.Errorf("[ResourceCount] panic recovered: %v", r)
+							}
 							<-sema // 释放信号量
 						}()
 						count, err := countResources(ctx, dynamicClient, gvr, namespaced)
