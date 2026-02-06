@@ -3,6 +3,9 @@ package kom
 import (
 	"testing"
 
+	"github.com/dgraph-io/ristretto/v2"
+	"github.com/weibaohui/kom/kom/aws"
+	"k8s.io/apimachinery/pkg/version"
 	"k8s.io/client-go/rest"
 )
 
@@ -19,7 +22,7 @@ func TestClusterRegistration(t *testing.T) {
 	cfg := &rest.Config{
 		Host: "https://test-cluster-reg",
 	}
-	k, err := Clusters().RegisterByConfig(cfg)
+	k, err := Clusters().RegisterByConfig(cfg, RegisterDisableCRDWatch())
 	if err != nil {
 		t.Fatalf("RegisterByConfig failed: %v", err)
 	}
@@ -55,7 +58,7 @@ func TestClusterRegistration(t *testing.T) {
 	cfg2 := &rest.Config{
 		Host: "https://test-cluster-callback",
 	}
-	_, err = Clusters().RegisterByConfig(cfg2)
+	_, err = Clusters().RegisterByConfig(cfg2, RegisterDisableCRDWatch())
 	if err != nil {
 		t.Fatalf("RegisterByConfig failed: %v", err)
 	}
@@ -65,27 +68,123 @@ func TestClusterRegistration(t *testing.T) {
 }
 
 func TestDefaultCluster(t *testing.T) {
-	// Note: DefaultCluster() behavior depends on how the first cluster is registered or if explicitly set.
-	// Since tests run in random order or parallel, we should be careful.
-	// However, we can check if it returns *something* if we have registered clusters.
+	// Case 1: Random/First available
+	RegisterFakeCluster("random-cluster")
+	if DefaultCluster() == nil {
+		t.Error("DefaultCluster should return a cluster when one is registered")
+	}
 
-	// Ensure at least one cluster is registered (from previous test or RegisterFakeCluster)
-	RegisterFakeCluster("default-test-cluster")
-	
-	// Assuming DefaultCluster returns the first one or a specific one.
-	// Let's just check it doesn't panic and returns a Kubectl if available.
-	// Implementation details of DefaultCluster logic might be needed to test strictly.
-	// Looking at code: DefaultCluster() calls Clusters().DefaultCluster().Kubectl
-	// We need to check Clusters().DefaultCluster() logic.
-	
-	// Let's assume for now we just call it.
-	defer func() {
-		if r := recover(); r != nil {
-			t.Logf("DefaultCluster panicked (might be no default set): %v", r)
-		}
-	}()
-	
-	// It might panic if no default is set?
-	// Let's check logic in cluster_base.go via Read if needed, but I'll skip deep verification for now.
-	// Actually, I'll read cluster_base.go again to see DefaultCluster logic.
+	// Case 2: "default" ID priority
+	RegisterFakeCluster("default")
+
+	dc := Clusters().DefaultCluster()
+	if dc.ID != "default" && dc.ID != "InCluster" {
+		// If "InCluster" is not there, it should be "default"
+		t.Errorf("DefaultCluster should prefer 'default', got %s", dc.ID)
+	}
+
+	// Case 3: "InCluster" ID priority
+	RegisterFakeCluster("InCluster")
+	dc = Clusters().DefaultCluster()
+	if dc.ID != "InCluster" {
+		t.Errorf("DefaultCluster should prefer 'InCluster', got %s", dc.ID)
+	}
+}
+
+func TestRemoveClusterById(t *testing.T) {
+	id := "test-remove-cluster"
+	RegisterFakeCluster(id)
+
+	if Cluster(id) == nil {
+		t.Fatalf("Cluster %s should exist", id)
+	}
+
+	Clusters().RemoveClusterById(id)
+
+	if Cluster(id) != nil {
+		t.Errorf("Cluster %s should be removed", id)
+	}
+
+	// Test EKS removal path
+	eksID := "test-eks-remove"
+	RegisterFakeCluster(eksID)
+	cluster := Clusters().GetClusterById(eksID)
+	cluster.IsEKS = true
+	cluster.AWSAuthProvider = aws.NewAuthProvider()
+
+	// Mock Cache
+	cache, _ := ristretto.NewCache(&ristretto.Config[string, any]{
+		NumCounters: 1e7,
+		MaxCost:     1 << 30,
+		BufferItems: 64,
+	})
+	cluster.Cache = cache
+
+	// Mock Cancel Func
+	cancelCalled := false
+	cluster.tokenRefreshCancel = func() {
+		cancelCalled = true
+	}
+
+	// Mock Watch CRD Cancel Func
+	watchCancelCalled := false
+	cluster.watchCRDCancelFunc = func() {
+		watchCancelCalled = true
+	}
+
+	Clusters().RemoveClusterById(eksID)
+
+	if Cluster(eksID) != nil {
+		t.Errorf("EKS Cluster %s should be removed", eksID)
+	}
+	if !cancelCalled {
+		t.Error("tokenRefreshCancel should be called for EKS cluster")
+	}
+	if !watchCancelCalled {
+		t.Error("watchCRDCancelFunc should be called")
+	}
+
+	// Check if fields are cleared
+	if cluster.Cache != nil {
+		t.Error("Cluster cache should be nil after removal")
+	}
+	if cluster.Client != nil {
+		t.Error("Cluster Client should be nil after removal")
+	}
+}
+
+func TestAllClusters(t *testing.T) {
+	RegisterFakeCluster("c1")
+	RegisterFakeCluster("c2")
+
+	all := Clusters().AllClusters()
+	if len(all) < 2 {
+		t.Errorf("Expected at least 2 clusters, got %d", len(all))
+	}
+	if _, ok := all["c1"]; !ok {
+		t.Error("c1 should be in AllClusters")
+	}
+}
+
+func TestShow(t *testing.T) {
+	RegisterFakeCluster("show-cluster")
+	// Just ensure it doesn't panic
+	Clusters().Show()
+}
+
+func TestGetServerVersion(t *testing.T) {
+	id := "version-cluster"
+	RegisterFakeCluster(id)
+	cluster := Clusters().GetClusterById(id)
+
+	// Mock version
+	cluster.serverVersion = &version.Info{GitVersion: "v1.28.0"}
+
+	v := cluster.GetServerVersion()
+	if v == nil {
+		t.Fatal("GetServerVersion returned nil")
+	}
+	if v.GitVersion != "v1.28.0" {
+		t.Errorf("Expected version v1.28.0, got %s", v.GitVersion)
+	}
 }
