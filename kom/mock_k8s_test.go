@@ -60,6 +60,12 @@ func RegisterFakeCluster(id string, objects ...runtime.Object) *Kubectl {
 					{Name: "horizontalpodautoscalers", Namespaced: true, Kind: "HorizontalPodAutoscaler", Verbs: []string{"list", "get", "create", "update", "delete"}},
 				},
 			},
+			{
+				GroupVersion: "example.com/v1",
+				APIResources: []metav1.APIResource{
+					{Name: "myapps", Namespaced: true, Kind: "MyApp", Verbs: []string{"list", "get", "create", "update", "delete"}},
+				},
+			},
 		}
 	}
 
@@ -112,6 +118,8 @@ func RegisterFakeCluster(id string, objects ...runtime.Object) *Kubectl {
 			{Name: "ingresses", Namespaced: true, Kind: "Ingress", Group: "networking.k8s.io", Version: "v1"},
 			{Name: "customresourcedefinitions", Namespaced: false, Kind: "CustomResourceDefinition", Group: "apiextensions.k8s.io", Version: "v1"},
 			{Name: "cronjobs", Namespaced: true, Kind: "CronJob", Group: "batch", Version: "v1"},
+			{Name: "horizontalpodautoscalers", Namespaced: true, Kind: "HorizontalPodAutoscaler", Group: "autoscaling", Version: "v2"},
+			{Name: "myapps", Namespaced: true, Kind: "MyApp", Group: "example.com", Version: "v1"},
 		},
 	}
 
