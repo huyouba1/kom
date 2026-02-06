@@ -13,6 +13,7 @@ require (
 	github.com/mark3labs/mcp-go v0.42.0
 	github.com/prometheus/client_golang v1.22.0
 	github.com/prometheus/common v0.62.0
+	github.com/stretchr/testify v1.10.0
 	github.com/xwb1989/sqlparser v0.0.0-20180606152119-120387863bf2
 	k8s.io/api v0.34.1
 	k8s.io/apiextensions-apiserver v0.34.1
